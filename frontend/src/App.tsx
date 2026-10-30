@@ -371,7 +371,7 @@ function App() {
             <button className="primary" onClick={() => setStep(0)}>
               Iniciar pesquisa <span>→</span>
             </button>
-            
+
           </section>
         ) : isComplete ? (
           <section className="survey-card finish">
