@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import './App.css'
-import { submitSurvey } from './services/surveyApi'
+import {
+  requestSurveyVerification,
+  confirmSurveyVerification,
+} from './services/surveyApi'
 import CookieBanner from './components/CookieBanner'
 type Question = {
   title: string
@@ -109,19 +112,19 @@ function formatPhone(value: string): string {
 
 
 function formatCnpj(value: string): string {
-  const digits = value.replace(/\\D/g, '').slice(0, 14)
+  const digits = value.replace(/\D/g, '').slice(0, 14)
 
   return digits
-    .replace(/^(\\d{2})(\\d)/, '$1.$2')
-    .replace(/^(\\d{2})\\.(\\d{3})(\\d)/, '$1.$2.$3')
-    .replace(/\\.(\\d{3})(\\d)/, '.$1/$2')
-    .replace(/(\\d{4})(\\d)/, '$1-$2')
+    .replace(/^(\d{2})(\d)/, '$1.$2')
+    .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1/$2')
+    .replace(/(\d{4})(\d)/, '$1-$2')
 }
 
 function validCnpj(value: string): boolean {
-  const digits = value.replace(/\\D/g, '')
+  const digits = value.replace(/\D/g, '')
 
-  if (!/^\\d{14}$/.test(digits) || /^(\\d)\\1+$/.test(digits)) {
+  if (!/^\d{14}$/.test(digits) || /^(\d)\1+$/.test(digits)) {
     return false
   }
 
@@ -154,6 +157,10 @@ function App() {
   const [privacyAccepted, setPrivacyAccepted] = useState(false)
   const [warning, setWarning] = useState('')
   const [sending, setSending] = useState(false)
+  const [verificationId, setVerificationId] = useState<string | null>(null)
+  const [verificationCode, setVerificationCode] = useState('')
+  const [verificationEmail, setVerificationEmail] = useState('')
+  const [verificationExpiresIn, setVerificationExpiresIn] = useState(0)
   const [submitError, setSubmitError] = useState('')
   const [website, setWebsite] = useState('')
   const [step, setStep] = useState(-1)
@@ -271,7 +278,7 @@ function App() {
     setSending(true)
 
     try {
-      await submitSurvey({
+      const verification = await requestSurveyVerification({
         institution: institution.trim(),
         cnpj: cnpj.replace(/\D/g, ''),
         city: city.trim(),
@@ -285,7 +292,11 @@ function App() {
         website,
       })
 
-      setStep(TOTAL_STEPS)
+      setVerificationId(verification.verification_id)
+      setVerificationCode('')
+      setVerificationEmail(email.trim())
+      setVerificationExpiresIn(verification.expires_in_seconds)
+      setStep(TOTAL_STEPS + 1)
     } catch (error) {
       setSubmitError(
         error instanceof Error
@@ -297,7 +308,62 @@ function App() {
     }
   }
 
+  async function confirmVerification() {
+    if (sending) return
+
+    if (!verificationId) {
+      setSubmitError(
+        'Verificação não encontrada. Solicite um novo código.'
+      )
+      return
+    }
+
+    if (!/^[0-9]{6}$/.test(verificationCode)) {
+      setSubmitError('Informe os seis dígitos do código.')
+      return
+    }
+
+    setSending(true)
+    setSubmitError('')
+
+    try {
+      const result = await confirmSurveyVerification(
+        verificationId,
+        verificationCode
+      )
+
+      if (!result.received) {
+        throw new Error(
+          'O servidor não confirmou o registro da pesquisa.'
+        )
+      }
+
+      setStep(TOTAL_STEPS)
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível confirmar o código.'
+      )
+    } finally {
+      setSending(false)
+    }
+  }
+
   function back() {
+    if (sending) return
+
+    setSubmitError('')
+
+    if (step === TOTAL_STEPS + 1) {
+      setVerificationId(null)
+      setVerificationCode('')
+      setVerificationEmail('')
+      setVerificationExpiresIn(0)
+      setStep(TOTAL_STEPS - 1)
+      return
+    }
+
     setStep(current => Math.max(-1, current - 1))
   }
 
@@ -338,7 +404,7 @@ function App() {
         <div className="brand">
           <div className="brand-icon">
             <img
-              src="/brand/favicon.png"
+              src={`${import.meta.env.BASE_URL}brand/favicon.png`}
               alt="Logo Info Service Technology"
             />
           </div>
@@ -372,6 +438,84 @@ function App() {
               Iniciar pesquisa <span>→</span>
             </button>
 
+          </section>
+        ) : step === TOTAL_STEPS + 1 ? (
+          <section className="survey-card">
+            <div className="eyebrow">
+              ETAPA DE VERIFICAÇÃO
+            </div>
+
+            <h2>Confirme seu e-mail</h2>
+
+            <p className="hint">
+              Enviamos um código de seis dígitos para:
+            </p>
+
+            <p>
+              <strong>{verificationEmail}</strong>
+            </p>
+
+            <p className="hint">
+              O código é válido por{' '}
+              {Math.ceil(verificationExpiresIn / 60)} minutos.
+            </p>
+
+            <div className="fields">
+              <label htmlFor="verification-code">
+                Código de verificação
+                <span className="required"> *</span>
+              </label>
+
+              <input
+                id="verification-code"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={verificationCode}
+                onChange={event => {
+                  const value = event.target.value
+                    .replace(/\D/g, '')
+                    .slice(0, 6)
+
+                  setVerificationCode(value)
+                  setSubmitError('')
+                }}
+                placeholder="000000"
+                disabled={sending}
+              />
+            </div>
+
+            {submitError && (
+              <p role="alert" className="field-hint">
+                {submitError}
+              </p>
+            )}
+
+            <div className="navigation">
+              <button
+                type="button"
+                className="primary"
+                onClick={confirmVerification}
+                disabled={
+                  sending ||
+                  !verificationId ||
+                  !/^[0-9]{6}$/.test(verificationCode)
+                }
+              >
+                {sending
+                  ? 'Confirmando...'
+                  : 'Confirmar e registrar pesquisa'}
+              </button>
+
+              <button
+                type="button"
+                onClick={back}
+                disabled={sending}
+              >
+                Corrigir e-mail ou dados
+              </button>
+            </div>
           </section>
         ) : isComplete ? (
           <section className="survey-card finish">

@@ -1,17 +1,40 @@
 from datetime import datetime, timezone
-from typing import Annotated
+from pathlib import Path
+import os
 from uuid import uuid4
 import re
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
-from sqlalchemy import create_engine, Column, String, DateTime, JSON
+from sqlalchemy import create_engine, Column, String, DateTime, JSON, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.exc import IntegrityError
 from cnpj import normalize_cnpj, valid_cnpj
+from email_sender import EmailDeliveryError, EmailSender, get_email_sender
+from email_verification import (
+    expiration_time,
+    generate_code,
+    generate_salt,
+    hash_code,
+)
+from survey_repository import cnpj_already_submitted
+from verification_rate_limit import retry_after_seconds
+from verification_models import EmailVerification
+from email_confirmation_routes import create_confirmation_router
 
-DATABASE_URL = "sqlite:///./pesquisa.db"
+DEFAULT_DATABASE_PATH = (
+    Path(__file__).resolve().parent / "pesquisa.db"
+)
+
+DATABASE_PATH = Path(
+    os.environ.get(
+        "IST_PESQUISA_DATABASE_PATH",
+        str(DEFAULT_DATABASE_PATH),
+    )
+).expanduser().resolve()
+
+DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 
 engine = create_engine(
     DATABASE_URL,
@@ -228,42 +251,109 @@ class SurveyPayload(BaseModel):
 def health():
     return {"status": "ok"}
 
-@app.post("/api/surveys", status_code=201)
+@app.post("/api/surveys", status_code=403)
 def submit(payload: SurveyPayload):
-    # Campo honeypot: não armazenar submissões de robôs.
+    """Bloqueia submissões sem confirmação de e-mail."""
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Confirmação de e-mail obrigatória. "
+            "Utilize o fluxo de verificação."
+        ),
+    )
+
+
+@app.post("/api/surveys/verification/request", status_code=202)
+def request_email_verification(
+    payload: SurveyPayload,
+    sender: EmailSender = Depends(get_email_sender),
+):
     if payload.website:
         return {"received": True}
 
     db = SessionLocal()
+
     try:
-        item = Submission(
+        # Reserva a escrita antes de consultar o limite.
+        # Impede duas solicitações simultâneas de passarem
+        # pela verificação usando o mesmo estado do banco.
+        db.execute(text("BEGIN IMMEDIATE"))
+
+        if cnpj_already_submitted(db, payload.cnpj, Submission):
+            raise HTTPException(
+                status_code=409,
+                detail="Esta unidade já respondeu à pesquisa.",
+            )
+
+        retry_after = retry_after_seconds(db, payload.cnpj)
+
+        if retry_after > 0:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "Muitas solicitações de verificação. "
+                    "Aguarde antes de solicitar outro código."
+                ),
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        code = generate_code()
+        salt = generate_salt()
+
+        verification = EmailVerification(
             id=str(uuid4()),
-            created_at=datetime.now(timezone.utc),
-            institution=payload.institution,
             cnpj=payload.cnpj,
-            city=payload.city,
-            respondent=payload.respondent,
-            role=payload.role,
             email=str(payload.email),
-            phone=payload.phone,
-            answers=[answer.model_dump() for answer in payload.answers],
-            privacy_accepted="true",
-            commercial_contact=str(payload.commercial_contact).lower(),
+            code_salt=salt,
+            code_hash=hash_code(code, salt),
+            payload=payload.model_dump(mode="json"),
+            attempts=0,
+            expires_at=expiration_time(),
         )
-        db.add(item)
+
+        db.add(verification)
+
+        # Libera a transação antes da operação externa.
         db.commit()
-        return {"received": True, "id": item.id}
+
+        try:
+            sender.send_verification_code(
+                recipient=str(payload.email),
+                code=code,
+            )
+        except EmailDeliveryError:
+            raise HTTPException(
+                status_code=503,
+                detail="Serviço de verificação temporariamente indisponível.",
+            )
+
+        return {
+            "verification_id": verification.id,
+            "expires_in_seconds": 600,
+        }
+
+    except HTTPException:
+        raise
     except IntegrityError:
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail="Esta unidade já respondeu à pesquisa."
+            detail="Conflito ao solicitar verificação.",
         )
     except Exception:
         db.rollback()
         raise HTTPException(
             status_code=500,
-            detail="Falha ao registrar pesquisa"
+            detail="Falha ao solicitar verificação.",
         )
     finally:
         db.close()
+
+
+app.include_router(
+    create_confirmation_router(
+        SessionLocal,
+        Submission,
+        SurveyPayload,
+    )
+)

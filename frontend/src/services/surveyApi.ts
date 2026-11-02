@@ -43,3 +43,98 @@ export async function submitSurvey(payload: SurveyPayload) {
 
   return response.json()
 }
+
+
+export type VerificationRequestResponse = {
+  verification_id: string
+  expires_in_seconds: number
+}
+
+export type VerificationConfirmationResponse = {
+  received: boolean
+  id: string
+}
+
+export async function requestSurveyVerification(
+  payload: SurveyPayload
+): Promise<VerificationRequestResponse> {
+  const response = await fetch(
+    `${API_URL}/api/surveys/verification/request`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    }
+  )
+
+  if (!response.ok) {
+    if (response.status === 409) {
+      throw new Error(
+        'Esta unidade de saúde já respondeu à pesquisa.'
+      )
+    }
+
+    if (response.status === 503) {
+      throw new Error(
+        'O serviço de verificação por e-mail está temporariamente indisponível.'
+      )
+    }
+
+    throw new Error(
+      `Não foi possível solicitar o código. HTTP ${response.status}`
+    )
+  }
+
+  return response.json()
+}
+
+export async function confirmSurveyVerification(
+  verificationId: string,
+  code: string
+): Promise<VerificationConfirmationResponse> {
+  const response = await fetch(
+    `${API_URL}/api/surveys/verification/confirm`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        verification_id: verificationId,
+        code,
+      }),
+    }
+  )
+
+  if (!response.ok) {
+    if (response.status === 400) {
+      throw new Error('Código de verificação incorreto.')
+    }
+
+    if (response.status === 410) {
+      throw new Error(
+        'Código expirado ou já utilizado. Solicite uma nova verificação.'
+      )
+    }
+
+    if (response.status === 429) {
+      throw new Error(
+        'Limite de tentativas atingido. Solicite um novo código.'
+      )
+    }
+
+    if (response.status === 409) {
+      throw new Error(
+        'Esta pesquisa já foi registrada ou a verificação não está mais disponível.'
+      )
+    }
+
+    throw new Error(
+      `Não foi possível confirmar o código. HTTP ${response.status}`
+    )
+  }
+
+  return response.json()
+}
