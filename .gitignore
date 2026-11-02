@@ -26,3 +26,8 @@ dist/
 # Sistema e editor
 .DS_Store
 .idea/
+
+# Backups de arquivos de código
+*.bak
+*.py.bak
+*.orig
