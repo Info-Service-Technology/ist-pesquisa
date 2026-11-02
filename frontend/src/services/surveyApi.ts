@@ -30,6 +30,32 @@ function getApiUrl(): string {
   return API_URL
 }
 
+export async function checkSurveyApiHealth(): Promise<void> {
+  const response = await fetch(`${getApiUrl()}/health`, {
+    method: 'GET',
+    signal: AbortSignal.timeout(5000),
+  })
+
+  if (!response.ok) {
+    throw new Error(
+      'O serviço da pesquisa está temporariamente indisponível.'
+    )
+  }
+
+  const data: unknown = await response.json()
+
+  if (
+    typeof data !== 'object' ||
+    data === null ||
+    !('status' in data) ||
+    data.status !== 'ok'
+  ) {
+    throw new Error(
+      'O serviço da pesquisa apresentou uma resposta inesperada.'
+    )
+  }
+}
+
 export async function submitSurvey(payload: SurveyPayload) {
   const response = await fetch(`${getApiUrl()}/api/surveys`, {
     method: 'POST',

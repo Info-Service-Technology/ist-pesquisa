@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import {
   requestSurveyVerification,
+  checkSurveyApiHealth,
   confirmSurveyVerification,
 } from './services/surveyApi'
 import CookieBanner from './components/CookieBanner'
@@ -157,6 +158,10 @@ function App() {
   const [privacyAccepted, setPrivacyAccepted] = useState(false)
   const [warning, setWarning] = useState('')
   const [sending, setSending] = useState(false)
+  const [apiStatus, setApiStatus] = useState<
+    'checking' | 'available' | 'unavailable'
+  >('checking')
+  const apiCheckId = useRef(0)
   const [verificationId, setVerificationId] = useState<string | null>(null)
   const [verificationCode, setVerificationCode] = useState('')
   const [verificationEmail, setVerificationEmail] = useState('')
@@ -388,6 +393,44 @@ function App() {
     setWebsite('')
   }
 
+  async function verifyApiAvailability(): Promise<void> {
+    const currentCheck = ++apiCheckId.current
+    setApiStatus('checking')
+
+    try {
+      await checkSurveyApiHealth()
+
+      if (currentCheck === apiCheckId.current) {
+        setApiStatus('available')
+      }
+    } catch {
+      if (currentCheck === apiCheckId.current) {
+        setApiStatus('unavailable')
+      }
+    }
+  }
+
+  useEffect(() => {
+    let active = true
+    const currentCheck = ++apiCheckId.current
+
+    checkSurveyApiHealth()
+      .then(() => {
+        if (active && currentCheck === apiCheckId.current) {
+          setApiStatus('available')
+        }
+      })
+      .catch(() => {
+        if (active && currentCheck === apiCheckId.current) {
+          setApiStatus('unavailable')
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
   useEffect(() => {
     if (!warning) return
 
@@ -434,9 +477,33 @@ function App() {
               <span>◇ Sem dados clínicos de pacientes</span>
             </div>
 
-            <button className="primary" onClick={() => setStep(0)}>
-              Iniciar pesquisa <span>→</span>
+            {apiStatus === 'unavailable' && (
+              <p role="alert" className="intro-api-error">
+                A pesquisa está temporariamente indisponível.
+                Nenhuma resposta foi enviada. Tente novamente mais tarde.
+              </p>
+            )}
+
+            <button
+              className="primary"
+              disabled={apiStatus !== 'available'}
+              onClick={() => setStep(0)}
+            >
+              {apiStatus === 'checking'
+                ? 'Verificando disponibilidade...'
+                : 'Iniciar pesquisa'}
+              <span>→</span>
             </button>
+
+            {apiStatus === 'unavailable' && (
+              <button
+                type="button"
+                className="intro-retry"
+                onClick={() => void verifyApiAvailability()}
+              >
+                Tentar novamente
+              </button>
+            )}
 
           </section>
         ) : step === TOTAL_STEPS + 1 ? (

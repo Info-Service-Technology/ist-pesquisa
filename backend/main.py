@@ -64,9 +64,18 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="IST Pesquisa API")
 
+cors_origins = [
+    origin.strip()
+    for origin in os.environ.get(
+        "IST_PESQUISA_CORS_ORIGINS",
+        "http://localhost:5175",
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5175"],
+    allow_origins=cors_origins,
     allow_credentials=False,
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],

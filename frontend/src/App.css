@@ -524,3 +524,41 @@ textarea:focus,
   width: 1px;
   height: 1px;
 }
+
+
+/* Indisponibilidade da API na tela inicial */
+.intro-api-error {
+  max-width: 620px;
+  margin: 20px auto 16px;
+  padding: 16px 20px;
+  border: 1px solid #ef9a9a;
+  border-left: 4px solid #c62828;
+  border-radius: 10px;
+  background: #fff1f2;
+  color: #991b1b;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.6;
+  text-align: left;
+}
+
+.intro-retry {
+  margin: 12px;
+  padding: 14px 22px;
+  border: 1px solid #345cdb;
+  border-radius: 11px;
+  background: transparent;
+  color: #345cdb;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.intro-retry:hover {
+  background: #edf2ff;
+}
+
+.intro-retry:focus-visible {
+  outline: 3px solid #8da5f5;
+  outline-offset: 3px;
+}
