@@ -18,10 +18,20 @@ export type SurveyPayload = {
   website: string
 }
 
-const API_URL = import.meta.env.VITE_API_URL
+const API_URL = (import.meta.env.VITE_API_URL ?? '').trim().replace(/\/$/, '')
+
+function getApiUrl(): string {
+  if (!API_URL || !/^https?:\/\//i.test(API_URL)) {
+    throw new Error(
+      'A pesquisa está temporariamente indisponível. Tente novamente mais tarde.'
+    )
+  }
+
+  return API_URL
+}
 
 export async function submitSurvey(payload: SurveyPayload) {
-  const response = await fetch(`${API_URL}/api/surveys`, {
+  const response = await fetch(`${getApiUrl()}/api/surveys`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -37,7 +47,7 @@ export async function submitSurvey(payload: SurveyPayload) {
     }
 
     throw new Error(
-      `Não foi possível registrar a pesquisa. HTTP ${response.status}`
+      'Não foi possível registrar sua resposta. Tente novamente mais tarde.'
     )
   }
 
@@ -59,7 +69,7 @@ export async function requestSurveyVerification(
   payload: SurveyPayload
 ): Promise<VerificationRequestResponse> {
   const response = await fetch(
-    `${API_URL}/api/surveys/verification/request`,
+    `${getApiUrl()}/api/surveys/verification/request`,
     {
       method: 'POST',
       headers: {
@@ -83,7 +93,7 @@ export async function requestSurveyVerification(
     }
 
     throw new Error(
-      `Não foi possível solicitar o código. HTTP ${response.status}`
+      'Não foi possível enviar o código de verificação. Tente novamente mais tarde.'
     )
   }
 
@@ -95,7 +105,7 @@ export async function confirmSurveyVerification(
   code: string
 ): Promise<VerificationConfirmationResponse> {
   const response = await fetch(
-    `${API_URL}/api/surveys/verification/confirm`,
+    `${getApiUrl()}/api/surveys/verification/confirm`,
     {
       method: 'POST',
       headers: {
@@ -132,7 +142,7 @@ export async function confirmSurveyVerification(
     }
 
     throw new Error(
-      `Não foi possível confirmar o código. HTTP ${response.status}`
+      'Não foi possível confirmar o código. Tente novamente mais tarde.'
     )
   }
 
