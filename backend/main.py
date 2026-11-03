@@ -20,6 +20,7 @@ from email_verification import (
 )
 from survey_repository import cnpj_already_submitted
 from verification_rate_limit import retry_after_seconds
+from verification_lock import lock_verification_request
 from verification_models import EmailVerification
 from email_confirmation_routes import create_confirmation_router
 
@@ -34,11 +35,21 @@ DATABASE_PATH = Path(
     )
 ).expanduser().resolve()
 
-DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
+DATABASE_URL = os.environ.get(
+    "IST_PESQUISA_DATABASE_URL",
+    f"sqlite:///{DATABASE_PATH}",
+)
+
+engine_options = {}
+
+if DATABASE_URL.startswith("sqlite:"):
+    engine_options["connect_args"] = {
+        "check_same_thread": False
+    }
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False}
+    **engine_options,
 )
 
 SessionLocal = sessionmaker(bind=engine)
@@ -50,7 +61,11 @@ class Submission(Base):
     id = Column(String, primary_key=True)
     created_at = Column(DateTime(timezone=True), nullable=False)
     institution = Column(String, nullable=False)
-    cnpj = Column(String(14), nullable=True)
+    cnpj = Column(
+        String(14),
+        nullable=True,
+        unique=True,
+    )
     city = Column(String, nullable=False)
     respondent = Column(String, nullable=False)
     role = Column(String, nullable=False)
@@ -60,7 +75,10 @@ class Submission(Base):
     privacy_accepted = Column(String, nullable=False)
     commercial_contact = Column(String, nullable=False)
 
-Base.metadata.create_all(bind=engine)
+# SQLite mantém a inicialização utilizada no desenvolvimento.
+# PostgreSQL terá inicialização explícita do esquema.
+if engine.dialect.name == "sqlite":
+    Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="IST Pesquisa API")
 
@@ -286,7 +304,7 @@ def request_email_verification(
         # Reserva a escrita antes de consultar o limite.
         # Impede duas solicitações simultâneas de passarem
         # pela verificação usando o mesmo estado do banco.
-        db.execute(text("BEGIN IMMEDIATE"))
+        lock_verification_request(db, payload.cnpj)
 
         if cnpj_already_submitted(db, payload.cnpj, Submission):
             raise HTTPException(
