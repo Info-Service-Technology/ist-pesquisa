@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 import os
+import logging
 from uuid import uuid4
 import re
 
@@ -23,6 +24,8 @@ from verification_rate_limit import retry_after_seconds
 from verification_lock import lock_verification_request
 from verification_models import EmailVerification
 from email_confirmation_routes import create_confirmation_router
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_DATABASE_PATH = (
     Path(__file__).resolve().parent / "pesquisa.db"
@@ -369,6 +372,7 @@ def request_email_verification(
         )
     except Exception:
         db.rollback()
+        logger.exception("Falha interna ao solicitar verificação")
         raise HTTPException(
             status_code=500,
             detail="Falha ao solicitar verificação.",
