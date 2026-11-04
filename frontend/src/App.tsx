@@ -241,7 +241,11 @@ function App() {
     if (!canContinue) {
       setWarning(
         step === 9
-          ? 'Preencha todos os campos obrigatórios, informe um e-mail e telefone válidos e confirme a ciência do aviso de privacidade.'
+          ? !cnpj.trim()
+            ? 'Informe o CNPJ da instituição.'
+            : !validCnpj(cnpj)
+              ? 'CNPJ inválido. Verifique os números informados e tente novamente.'
+              : 'Preencha todos os campos obrigatórios, informe um e-mail e telefone válidos e confirme a ciência do aviso de privacidade.'
           : 'Esta resposta é obrigatória. Preencha antes de continuar.'
       )
       return
@@ -577,6 +581,7 @@ function App() {
 
               <button
                 type="button"
+                className="secondary"
                 onClick={back}
                 disabled={sending}
               >
